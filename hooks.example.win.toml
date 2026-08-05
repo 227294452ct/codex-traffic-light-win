@@ -1,0 +1,57 @@
+# Codex Traffic Light MXP — Windows hooks config (example)
+#
+# install.bat generates a concrete copy at:
+#   %LOCALAPPDATA%\CodexTrafficLight\hooks.win.generated.toml
+# with your real paths baked in. Merge its [hooks] block into
+# %USERPROFILE%\.codex\config.toml, then run /hooks in Codex
+# and trust the commands.
+#
+# If you prefer to write it by hand, replace <USERPROFILE> with
+# your real user directory (e.g. C:/Users/Administrator).
+
+[[hooks.UserPromptSubmit]]
+[[hooks.UserPromptSubmit.hooks]]
+type = "command"
+command = "<USERPROFILE>/.codex/bin/codex-light-hook-mxp.cmd UserPromptSubmit"
+timeout = 5
+statusMessage = "Codex traffic light: working"
+
+[[hooks.PreToolUse]]
+matcher = ".*"
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = "<USERPROFILE>/.codex/bin/codex-light-hook-mxp.cmd PreToolUse"
+timeout = 5
+statusMessage = "Codex traffic light: working"
+
+[[hooks.PermissionRequest]]
+matcher = ".*"
+[[hooks.PermissionRequest.hooks]]
+type = "command"
+command = "<USERPROFILE>/.codex/bin/codex-light-hook-mxp.cmd PermissionRequest"
+timeout = 5
+statusMessage = "Codex traffic light: waiting"
+
+[[hooks.Stop]]
+[[hooks.Stop.hooks]]
+type = "command"
+command = "<USERPROFILE>/.codex/bin/codex-light-hook-mxp.cmd Stop"
+timeout = 5
+statusMessage = "Codex traffic light: done"
+
+[[hooks.SubagentStop]]
+matcher = ".*"
+[[hooks.SubagentStop.hooks]]
+type = "command"
+command = "<USERPROFILE>/.codex/bin/codex-light-hook-mxp.cmd SubagentStop"
+timeout = 5
+statusMessage = "Codex traffic light: subagent done"
+
+# Optional: quota-only hook event (only if your Codex emits it):
+#
+# [[hooks."account/rateLimits/updated"]]
+# [[hooks."account/rateLimits/updated".hooks]]
+# type = "command"
+# command = "<USERPROFILE>/.codex/bin/codex-light-hook-mxp.cmd account/rateLimits/updated"
+# timeout = 5
+# statusMessage = "Codex traffic light: quota updated"

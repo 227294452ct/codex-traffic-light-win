@@ -1,0 +1,17 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Test / verification artifacts
+verify/
+tests/__pycache__/
+
+# Local runtime data
+*.log
+state.json
+preferences.json
+
+# OS
+Thumbs.db
+Desktop.ini
