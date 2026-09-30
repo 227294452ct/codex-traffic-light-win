@@ -145,31 +145,45 @@ def main(argv: list) -> int:
         return 0
 
     last_state: LightState | None = None
+    consecutive_errors = 0
     while True:
-        state, reason = probe(db_path, activity_window, wait_confirm, done_window)
-        snapshot = store.read()
-        existing = snapshot.tasks.get(TASK_ID)
-        existing_state = existing.state if existing else None
+        try:
+            state, reason = probe(db_path, activity_window, wait_confirm, done_window)
+            snapshot = store.read()
+            existing = snapshot.tasks.get(TASK_ID)
+            existing_state = existing.state if existing else None
 
-        needs_write = state != existing_state
-        if state == LightState.idle and existing is None:
-            needs_write = False  # nothing to clean up
+            needs_write = state != existing_state
+            if state == LightState.idle and existing is None:
+                needs_write = False  # nothing to clean up
 
-        if needs_write:
-            try:
-                snapshot = store.update_task(
-                    task_id=TASK_ID, state=state,
-                    workspace=None, source=TASK_SOURCE,
-                    hook_event_name=None,
-                    message=f"Hermes traffic light: {state.value} ({reason})",
-                )
-                append_log(
-                    f"state={state.value} reason={reason} aggregate={snapshot.aggregate_state.value}",
-                    log_path,
-                )
-            except OSError as exc:
-                append_log(f"write_failed={exc}", log_path)
-            last_state = state
+            if needs_write:
+                try:
+                    snapshot = store.update_task(
+                        task_id=TASK_ID, state=state,
+                        workspace=None, source=TASK_SOURCE,
+                        hook_event_name=None,
+                        message=f"Hermes traffic light: {state.value} ({reason})",
+                    )
+                    append_log(
+                        f"state={state.value} reason={reason} aggregate={snapshot.aggregate_state.value}",
+                        log_path,
+                    )
+                except OSError as exc:
+                    append_log(f"write_failed={exc}", log_path)
+                last_state = state
+            consecutive_errors = 0
+        except BaseException as exc:  # never die silently: log & keep polling
+            import traceback
+            consecutive_errors += 1
+            append_log(
+                f"CRASH_GUARD error#{consecutive_errors} {type(exc).__name__}: {exc} "
+                f"traceback={traceback.format_exc()!r}",
+                log_path,
+            )
+            if consecutive_errors >= 5:
+                # persistent failure: exit so the startup guard can respawn us
+                raise
         time.sleep(poll_seconds)
 
 

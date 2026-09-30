@@ -394,6 +394,48 @@ def test_multi_task_aggregation_via_cli():
         assert r.stdout.strip() == "waiting"  # waiting wins
 
 
+def test_progress_command():
+    """`codex-light-mxp progress` reads back a human sentence + --json snapshot."""
+    with tempfile.TemporaryDirectory() as tmp:
+        state_path = os.path.join(tmp, "state.json")
+        run_cli(state_path, "clear")
+        run_cli(state_path, "quota", "--five-hour", "72", "--weekly", "48")
+        run_cli(state_path, "--task", "demo-a", "working")
+
+        # bare progress -> human-readable 人话 (aggregate light + tasks + quota)
+        r = run_cli(state_path, "progress")
+        assert r.returncode == 0, r.stderr
+        out = r.stdout
+        assert "红绿灯" in out
+        assert ("正在干活" in out) or ("黄灯" in out)
+        assert "demo-a" in out
+
+        # progress --json -> structured snapshot a codex agent should parse
+        r = run_cli(state_path, "progress", "--json")
+        assert r.returncode == 0, r.stderr
+        data = json.loads(r.stdout)
+        assert data["aggregate_state"] == "working"
+        assert data["aggregate_label"] == "正在干活"
+        assert data["color"] == "黄灯"
+        assert data["active_tasks"] == 1
+        assert data["quota"]["five_hour_remaining_percent"] == 72
+        assert data["quota"]["weekly_remaining_percent"] == 48
+        task = data["tasks"][0]
+        assert task["task_id"] == "demo-a"
+        assert task["state"] == "working"
+        assert task["state_label"] == "正在干活"
+        assert task["color"] == "黄灯"
+        assert "updated_at" in task and "age_seconds" in task
+
+        # empty store -> a clean idle summary, not a crash
+        run_cli(state_path, "clear")
+        r = run_cli(state_path, "progress", "--json")
+        assert r.returncode == 0, r.stderr
+        empty = json.loads(r.stdout)
+        assert empty["aggregate_state"] == "idle"
+        assert empty["active_tasks"] == 0 and empty["tasks"] == []
+
+
 def test_hermes_watcher_probe():
     """hermes-watcher state decisions against a synthetic state.db."""
     import importlib.util

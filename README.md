@@ -5,6 +5,11 @@
 **无任何第三方依赖**，命令、hooks 协议、状态文件 JSON 格式与原版完全兼容——同一份
 `state.json` 在 macOS / Windows 之间可直接互换。
 
+当前 UI 为 **304×60 动态岛悬浮窗**：左侧状态点与中文状态、右侧红黄绿三灯。
+Windows 显示层使用系统自带 GDI+ 抗锯齿和 `UpdateLayeredWindow` 逐像素 Alpha，
+使圆角与阴影平滑融入桌面；不需要额外安装图形库。浮窗和右键菜单不显示额度，
+额度采集与命令行查询仍保留。
+
 > 许可证：Apache License 2.0（原项目同为 Apache 2.0，本移植版保留原作者版权与
 > 署名声明，详见 [NOTICE](NOTICE) 与 [LICENSE](LICENSE)。
 
@@ -30,7 +35,12 @@ codex-traffic-light-win/
 │   ├── core.py                  # 状态机 / 状态文件 / 环境变量默认值
 │   ├── hook.py                  # hook 事件解析 / 映射 / 日志
 │   ├── quota.py                 # 额度提取 + codex app-server JSON-RPC 采集
+│   ├── layered.py               # Windows GDI+ 抗锯齿 / 逐像素 Alpha 渲染
 │   └── app.py                   # tkinter 悬浮红绿灯 GUI
+├── hermes-watcher.py            # Hermes 会话状态监测
+├── qwen-watcher.py              # 千问办公活动监测
+├── codex-traffic-light-mxp.vbs  # 自启动与进程守护模板
+├── light-on.vbs                 # 退出后重新开启红绿灯
 ├── install.bat / uninstall.bat  # 安装 / 卸载
 ├── hooks.example.win.toml       # hooks 配置模板（Windows 路径）
 └── tests/test_smoke.py          # 测试（无需 pytest）
@@ -47,6 +57,9 @@ codex-traffic-light-win/
 3. 在「启动」文件夹放一个 VBS 实现开机自启
 4. 生成带真实路径的 hooks 配置：`%LOCALAPPDATA%\CodexTrafficLight\hooks.win.generated.toml`
 
+自启动守护每 30 秒检查 GUI 与 watcher。通过右键菜单选择“退出并不再自动启动”后，
+可运行 `%LOCALAPPDATA%\CodexTrafficLight\light-on.vbs` 重新开启。
+
 ### 2. 启动红绿灯
 
 ```bat
@@ -56,7 +69,7 @@ pythonw "%LOCALAPPDATA%\CodexTrafficLight\app\run_app.pyw"
 或手动运行（开发模式，能看到日志）：
 
 ```bat
-python F:\agent项目\Hermes\红绿灯\codex-traffic-light-win\run_app.pyw
+python run_app.pyw
 ```
 
 - **拖动**：按住左键拖到任意位置（位置会记住）
@@ -80,6 +93,8 @@ codex-light-mxp waiting          rem 红灯
 codex-light-mxp idle             rem 全暗
 codex-light-mxp status           rem 查询（输出 idle/working/done/waiting/quit）
 codex-light-mxp --json status    rem JSON 快照
+codex-light-mxp progress         rem 查询当前进度（人话摘要：灯色/聚合态/各任务/额度）
+codex-light-mxp progress --json  rem 结构化进度快照（codex 推荐用这个读取当前进度）
 codex-light-mxp clear            rem 清空失联任务（保留额度）
 codex-light-mxp quit             rem 写入 quit，GUI 检测到后自动退出
 codex-light-mxp --task demo-a working
@@ -87,6 +102,22 @@ codex-light-mxp quota --five-hour 72 --weekly 48
 echo {"quota":{"five_hour_remaining_percent":72,"weekly_remaining_percent":48}} | codex-light-mxp quota --stdin
 codex-light-mxp quota --app-server --json    rem 通过 codex app-server 读真实额度
 ```
+
+### 让 Codex 读取当前进度
+
+红绿灯原本只给人看颜色，Codex 只能通过 hooks **写入**状态。现在新增了
+`codex-light-mxp progress`，让 Codex（或你）用一条命令**读回当前进度**：
+
+- `codex-light-mxp progress` —— 人话摘要：当前灯色、聚合状态、每个任务的中文
+  状态 + 最后消息 + 工作目录 + 相对时间，以及额度。
+- `codex-light-mxp progress --json` —— 结构化快照（`aggregate_state` /
+  `aggregate_label` / `color` / `emoji` / `active_tasks` / `state_updated_at` /
+  `quota` / `tasks[]`，每个任务含 `state`、`state_label`、`source`、
+  `hook_event_name`、`message`、`workspace`、`updated_at`、`age_seconds`）。
+  Codex 自己读进度时推荐用这个格式。
+
+仓库根目录的 [`AGENTS.md`](AGENTS.md) 已经写好了给 Codex 的指引（怎么调
+`progress`、返回什么），codex 在该目录工作时会自动读取它。
 
 ## Windows 适配说明（环境变量）
 
@@ -156,7 +187,8 @@ python hermes-watcher.py --once        rem 输出当前判定，如 working (too
 
 ## 与原版的差异
 
-- **UI 层**：AppKit 菜单栏 → tkinter 悬浮窗；菜单栏菜单 → 悬浮窗右键菜单（Windows 无菜单栏）。
+- **UI 层**：AppKit 菜单栏 → 304×60 动态岛悬浮窗；Windows 使用 GDI+ 抗锯齿与逐像素 Alpha 合成，
+  tkinter 负责事件、右键菜单和兼容回退。
 - **提示音**：macOS 系统声音（Glass/Basso）→ Windows 系统声音（SystemAsterisk / SystemHand），
   时长与循环逻辑不变。
 - **codex 二进制解析**：Windows 下 npm 安装的 codex 是 `.cmd` shim，采集器会自动经 `cmd /c` 启动；
@@ -167,7 +199,7 @@ python hermes-watcher.py --once        rem 输出当前判定，如 working (too
 ## 测试
 
 ```bat
-python tests\test_smoke.py
+python -X utf8 tests\test_smoke.py
 ```
 
 覆盖：聚合优先级、done 过期、hook 事件映射（含中文"等你回复"判定）、额度提取/映射、

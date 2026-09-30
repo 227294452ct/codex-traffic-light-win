@@ -20,6 +20,7 @@ copy /Y "%PORT_DIR%codex-light-mxp.py" "%APP_DIR%\" >nul
 copy /Y "%PORT_DIR%codex-light-hook-mxp.py" "%APP_DIR%\" >nul
 copy /Y "%PORT_DIR%run_app.pyw" "%APP_DIR%\" >nul
 copy /Y "%PORT_DIR%hermes-watcher.py" "%APP_DIR%\" >nul
+copy /Y "%PORT_DIR%qwen-watcher.py" "%APP_DIR%\" >nul
 copy /Y "%PORT_DIR%README.md" "%APP_DIR%\" >nul
 
 echo [2/5] Creating command shims in %BIN_DIR% ...
@@ -34,14 +35,19 @@ powershell -NoProfile -Command "$p=[Environment]::GetEnvironmentVariable('Path',
 
 echo [3/5] Detecting pythonw for autostart ...
 set "PYW="
-for /f "delims=" %%i in ('where pythonw 2^>nul') do if not defined PYW set "PYW=%%i"
+rem Skip uv launcher stubs (~45KB) which fork a console-bearing python.exe
+rem child and show extra windows on the desktop; pick a real interpreter.
+for /f "delims=" %%i in ('where pythonw 2^>nul') do if not defined PYW if %%~zi GTR 60000 set "PYW=%%i"
 if not defined PYW set "PYW=pythonw.exe"
 echo    using %PYW%
 
 echo [4/5] Creating autostart entries in Startup folder ...
-> "%STARTUP_DIR%\codex-traffic-light-mxp.vbs" echo Set ws = CreateObject("WScript.Shell")
->> "%STARTUP_DIR%\codex-traffic-light-mxp.vbs" echo ws.Run ^"%PYW%^" ^"%APP_DIR%\run_app.pyw^", 0, False
->> "%STARTUP_DIR%\codex-traffic-light-mxp.vbs" echo ws.Run ^"%PYW%^" ^"%APP_DIR%\hermes-watcher.py^", 0, False
+rem VBS is copied from the repo template (echo-based generation cannot
+rem handle & and quote escaping reliably) then __PYW__ is substituted.
+copy /Y "%PORT_DIR%codex-traffic-light-mxp.vbs" "%STARTUP_DIR%codex-traffic-light-mxp.vbs" >nul
+powershell -NoProfile -Command "(Get-Content '%STARTUP_DIR%codex-traffic-light-mxp.vbs' -Raw).Replace('__PYW__', '%PYW%') | Set-Content '%STARTUP_DIR%codex-traffic-light-mxp.vbs' -Encoding Default"
+copy /Y "%PORT_DIR%light-on.vbs" "%DATA_DIR%\light-on.vbs" >nul
+powershell -NoProfile -Command "(Get-Content '%DATA_DIR%\light-on.vbs' -Raw).Replace('__PYW__', '%PYW%') | Set-Content '%DATA_DIR%\light-on.vbs' -Encoding Default"
 
 echo [5/5] Generating hooks config: %DATA_DIR%\hooks.win.generated.toml ...
 > "%DATA_DIR%\hooks.win.generated.toml" echo # Codex Traffic Light MXP - Windows hooks config

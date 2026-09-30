@@ -1,7 +1,7 @@
 """Codex Traffic Light MXP (Windows port) — command line control tool.
 
 Usage:
-  codex-light-mxp [--task <task-id>] [--workspace <path>] [--json] <working|done|waiting|idle|status|clear|quit>
+  codex-light-mxp [--task <task-id>] [--workspace <path>] [--json] <working|done|waiting|idle|status|progress|clear|quit>
   codex-light-mxp quota --five-hour <0-100> --weekly <0-100> [--json]
   codex-light-mxp quota --stdin [--json]
   codex-light-mxp quota --app-server [--json]
@@ -22,6 +22,8 @@ from codex_light.core import (  # noqa: E402
     StateStore,
     StateStoreError,
     parse_state,
+    progress_summary_dict,
+    progress_summary_text,
     resolve_task_id,
     resolve_workspace,
 )
@@ -30,10 +32,16 @@ from codex_light.quota import CodexAppServerQuotaCollector, QuotaExtractor  # no
 
 def usage() -> None:
     sys.stderr.write(
-        f"""Usage: {CommandContract.light_command_name} [--task <task-id>] [--workspace <path>] [--json] <working|done|waiting|idle|status|clear|quit>
+        f"""Usage: {CommandContract.light_command_name} [--task <task-id>] [--workspace <path>] [--json] <working|done|waiting|idle|status|progress|clear|quit>
        {CommandContract.light_command_name} {CommandContract.quota_command_name} --five-hour <0-100> --weekly <0-100> [--json]
        {CommandContract.light_command_name} {CommandContract.quota_command_name} --stdin [--json]
        {CommandContract.light_command_name} {CommandContract.quota_command_name} --app-server [--json]
+
+  progress   Human-readable + (--json) structured snapshot of the current
+             progress: lit light, aggregate state, each tracked task with its
+             Chinese label / source / last message / workspace / age, and the
+             quota.  The one-call interface a codex agent uses to read "where
+             am I" without parsing the raw state.json.
 
 """
     )
@@ -120,6 +128,13 @@ def main(argv: list) -> int:
     try:
         if options.command == "status":
             print_snapshot(store.read(), options.json)
+        elif options.command == "progress":
+            snapshot = store.read()
+            if options.json:
+                print(json.dumps(progress_summary_dict(snapshot),
+                                 ensure_ascii=False, indent=2, sort_keys=True))
+            else:
+                print(progress_summary_text(snapshot))
         elif options.command == "clear":
             print_snapshot(store.clear(), options.json)
         elif options.command == CommandContract.quota_command_name:

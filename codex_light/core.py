@@ -390,3 +390,145 @@ def parse_state(command: str) -> LightState:
         return LightState(command)
     except ValueError:
         raise StateStoreError("Unknown state: " + command)
+
+
+# ---------------------------------------------------------------------------
+# Codex-readable progress summary (`codex-light-mxp progress`)
+#
+# Gives the codex agent (or a human) a one-call snapshot of the current
+# "progress": which light is lit, the aggregate state, every tracked task
+# with its Chinese label / source / last message / workspace / age, and the
+# quota. `progress_summary_dict` is the machine-readable form for --json;
+# `progress_summary_text` is the "人话" one-liner + bullets for bare output.
+# ---------------------------------------------------------------------------
+
+# light color/emoji per state (idle keeps the dark lamp, quit = dark/退出)
+_STATE_INFO = {
+    LightState.idle: ("⚫", "暗灯"),
+    LightState.working: ("🟡", "黄灯"),
+    LightState.done: ("🟢", "绿灯"),
+    LightState.waiting: ("🔴", "红灯"),
+    LightState.quit: ("⚫", "灯灭"),
+}
+
+
+def state_color_info(state: LightState) -> tuple:
+    """Return (emoji, light_color) for a state, mirroring the visual lamp."""
+    return _STATE_INFO.get(state, ("⚫", "暗灯"))
+
+
+def _relative_age(seconds: float) -> str:
+    """Human-friendly relative age: '刚刚' / '42秒前' / '3分钟前' / '2小时前'."""
+    if seconds < 0:
+        seconds = 0.0
+    if seconds < 5:
+        return "刚刚"
+    if seconds < 60:
+        return "%d秒前" % int(seconds)
+    if seconds < 3600:
+        return "%d分钟前" % int(seconds // 60)
+    if seconds < 86400:
+        return "%d小时前" % int(seconds // 3600)
+    return "%d天前" % int(seconds // 86400)
+
+
+def _fmt_time(timestamp: float) -> str:
+    try:
+        return datetime.fromtimestamp(timestamp).astimezone().strftime("%m-%d %H:%M:%S")
+    except (OSError, ValueError, OverflowError):
+        return "-"
+
+
+def _truncate(text: Optional[str], limit: int = 120) -> str:
+    if not text:
+        return ""
+    flat = str(text).replace("\n", " ").replace("\r", " ").strip()
+    return flat if len(flat) <= limit else flat[:limit - 1] + "…"
+
+
+def _quota_inline(quota: Optional[dict]) -> str:
+    if not quota:
+        return "额度未知"
+    return "5小时剩%d%% · 周剩%d%%" % (
+        quota["five_hour_remaining_percent"], quota["weekly_remaining_percent"])
+
+
+def progress_summary_dict(snapshot: StateSnapshot, now: Optional[float] = None) -> dict:
+    """Structured, codex-friendly progress snapshot (used by `progress --json`).
+
+    Includes the aggregate light, every tracked task (newest-first within
+    priority), and the quota snapshot — all with human labels and ages so a
+    codex agent can reason about "where am I" without parsing the raw store.
+    """
+    now = now if now is not None else time.time()
+    aggregate = snapshot.aggregate_state
+    emoji, color = state_color_info(aggregate)
+
+    tasks = []
+    ordered = sorted(
+        snapshot.tasks.items(),
+        key=lambda kv: (-kv[1].state.sort_priority, kv[1].updated_at),
+    )
+    for task_id, task in ordered:
+        task_emoji, task_color = state_color_info(task.state)
+        tasks.append({
+            "task_id": task_id,
+            "state": task.state.value,
+            "state_label": task.state.label,
+            "color": task_color,
+            "emoji": task_emoji,
+            "source": task.source,
+            "hook_event_name": task.hook_event_name,
+            "message": task.message,
+            "workspace": task.workspace,
+            "updated_at": task.updated_at,
+            "age_seconds": max(0.0, now - task.updated_at),
+        })
+
+    quota = None
+    if snapshot.quota is not None:
+        quota = {
+            "five_hour_remaining_percent": snapshot.quota.five_hour_remaining_percent,
+            "weekly_remaining_percent": snapshot.quota.weekly_remaining_percent,
+            "source": snapshot.quota.source,
+            "updated_at": snapshot.quota.updated_at,
+        }
+
+    return {
+        "aggregate_state": aggregate.value,
+        "aggregate_label": aggregate.label,
+        "color": color,
+        "emoji": emoji,
+        "active_tasks": len(tasks),
+        "state_updated_at": snapshot.updated_at,
+        "quota": quota,
+        "tasks": tasks,
+    }
+
+
+def progress_summary_text(snapshot: StateSnapshot, now: Optional[float] = None) -> str:
+    """Readable '人话' progress summary (bare `progress` output)."""
+    data = progress_summary_dict(snapshot, now=now)
+    now = now if now is not None else time.time()
+    emoji, color = data["emoji"], data["color"]
+    label, count = data["aggregate_label"], data["active_tasks"]
+
+    lines = []
+    if count == 0:
+        lines.append("%s 红绿灯：%s · %s（当前没有跟踪中的任务）" % (emoji, color, label))
+    else:
+        lines.append("%s 红绿灯：%s · %s（%d 个任务跟踪中）" % (emoji, color, label, count))
+    lines.append("· 状态更新 %s ｜ 额度：%s" % (_fmt_time(data["state_updated_at"]),
+                                              _quota_inline(data["quota"])))
+
+    for task in data["tasks"]:
+        lines.append("▶ %s [%s] → %s" % (task["emoji"], task["source"] or "-", task["task_id"]))
+        age = _relative_age(task["age_seconds"])
+        message = _truncate(task["message"], 120)
+        if message:
+            lines.append("   · 「%s」 · %s" % (message, age))
+        else:
+            lines.append("   · %s" % age)
+        if task["workspace"]:
+            lines.append("   · 目录：%s" % task["workspace"])
+    return "\n".join(lines)
